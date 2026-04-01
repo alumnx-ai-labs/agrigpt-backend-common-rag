@@ -1,0 +1,78 @@
+name: "Bug Report"
+description: "Report a bug in the AgriGPT RAG pipeline"
+title: "Bug: [Short description of the bug]"
+labels: ["bug", "triage"]
+
+body:
+  - type: markdown
+    attributes:
+      value: |
+        ## 🐛 Bug Report
+        > Issues with vague titles or incomplete descriptions are **automatically closed** by Claude.
+
+  - type: dropdown
+    id: component
+    attributes:
+      label: "Affected Component"
+      options:
+        - "PDF Ingestion / Text Extraction"
+        - "Text Chunking / Overlap Strategy"
+        - "Embedding Generation (Sentence Transformers)"
+        - "Pinecone Upsert / Vector Storage"
+        - "Pinecone Query / Retrieval"
+        - "Metadata Handling"
+        - "Pipeline Orchestration"
+        - "Configuration / Environment Setup"
+        - "CI/CD / DevOps"
+        - "Other"
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual-behavior
+    attributes:
+      label: "Actual Behavior"
+      description: "What is happening right now? Include error messages and stack traces."
+      placeholder: "When running the ingestion pipeline on a 50-page PDF, the chunker returns 0 chunks. No error is raised."
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected-behavior
+    attributes:
+      label: "Expected Behavior"
+      description: "What should happen instead?"
+      placeholder: "The chunker should return N chunks based on CHUNK_SIZE env var, or raise ValueError if no text found."
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: "Steps to Reproduce"
+      placeholder: |
+        1. Set CHUNK_SIZE=512 in .env
+        2. Run: python ingest.py --file sample.pdf
+        3. Observe: 0 chunks returned, no error
+    validations:
+      required: true
+
+  - type: input
+    id: environment
+    attributes:
+      label: "Environment"
+      placeholder: "Python 3.11 | pinecone-client 3.x | sentence-transformers 2.x | Local"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: severity
+    attributes:
+      label: "Severity"
+      options:
+        - "Critical — Data loss or pipeline completely broken"
+        - "High — Core RAG functionality broken"
+        - "Medium — Partial functionality broken, workaround exists"
+        - "Low — Minor issue, non-blocking"
+    validations:
+      required: true

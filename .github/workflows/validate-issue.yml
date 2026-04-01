@@ -1,0 +1,54 @@
+name: "Claude — Issue Quality Gate"
+
+on:
+  issues:
+    types: [opened, edited]
+
+permissions:
+  issues: write
+  contents: read
+
+jobs:
+  validate-issue:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Claude Issue Validator
+        uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          prompt: |
+            You are the Issue Quality Gate for agrigpt-backend-common-rag — a Python RAG pipeline (PDF → chunking → Sentence Transformers 384-dim → Pinecone).
+
+            ISSUE SUBMITTED:
+            Number : ${{ github.event.issue.number }}
+            Title  : ${{ github.event.issue.title }}
+            Author : ${{ github.event.issue.user.login }}
+            Body:
+            ${{ github.event.issue.body }}
+
+            TITLE RULES (all must pass):
+            1. Must start with: Bug:, Feature:, Fix:, Docs:, Chore:, Enhancement:, Test:, or Perf:
+            2. At least 15 meaningful characters after the prefix
+            3. Must NOT use only vague words: "broken", "fix", "help", "error", "issue", "update", "problem"
+            4. Must NOT be random characters (asdf, test123, aaa)
+            5. Should relate to: PDF, chunking, embeddings, Pinecone, RAG, ingestion, pipeline, metadata
+
+            DESCRIPTION RULES (all must pass):
+            1. At least 120 total characters
+            2. For Bug: must describe actual behavior, expected behavior, AND steps to reproduce
+            3. For Feature: must describe problem, proposed solution, AND acceptance criteria
+            4. No placeholder text (TBD, TODO, "describe your issue here")
+
+            CASE A — FAILS: run in order:
+            1. gh issue edit ${{ github.event.issue.number }} --add-label "invalid"
+            2. Post comment explaining exactly what was wrong and show a corrected example
+            3. gh issue close ${{ github.event.issue.number }} --reason "not planned"
+
+            CASE B — PASSES: run in order:
+            1. gh issue edit ${{ github.event.issue.number }} --add-label "valid-issue"
+            2. Post welcome comment: "✅ Issue accepted. Add `Closes #${{ github.event.issue.number }}` to your PR description when you raise one."
+
+            Execute now using gh CLI. Be specific about what was wrong.

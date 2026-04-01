@@ -1,0 +1,72 @@
+name: "Feature Request"
+description: "Propose a new feature or enhancement for the AgriGPT RAG pipeline"
+title: "Feature: [Short description of the feature]"
+labels: ["enhancement", "triage"]
+
+body:
+  - type: markdown
+    attributes:
+      value: |
+        ## ✨ Feature Request
+        > Issues with vague titles or incomplete descriptions are **automatically closed** by Claude.
+
+  - type: dropdown
+    id: component
+    attributes:
+      label: "Target Component"
+      options:
+        - "PDF Ingestion / Text Extraction"
+        - "Text Chunking / Overlap Strategy"
+        - "Embedding Generation (Sentence Transformers)"
+        - "Pinecone Upsert / Vector Storage"
+        - "Pinecone Query / Retrieval"
+        - "Metadata Schema"
+        - "Pipeline Orchestration / Configuration"
+        - "Performance / Batching"
+        - "Observability / Logging"
+        - "CI/CD / DevOps"
+    validations:
+      required: true
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: "Problem / Gap"
+      description: "What is missing or broken that this feature would fix?"
+      placeholder: "Currently, chunk size and overlap are hardcoded to 512 and 50. This means we cannot optimize RAG retrieval without changing source code and redeploying."
+    validations:
+      required: true
+
+  - type: textarea
+    id: solution
+    attributes:
+      label: "Proposed Solution"
+      description: "Describe what you want built. Be specific."
+      placeholder: "Add CHUNK_SIZE and CHUNK_OVERLAP environment variables read at startup via os.environ.get(). Update .env.example with defaults."
+    validations:
+      required: true
+
+  - type: textarea
+    id: acceptance-criteria
+    attributes:
+      label: "Acceptance Criteria"
+      description: "Checkboxes that must ALL be true for this to be done. Claude uses these to verify the PR."
+      placeholder: |
+        - [ ] CHUNK_SIZE env var read at startup, default 512
+        - [ ] CHUNK_OVERLAP env var read at startup, default 50
+        - [ ] .env.example updated
+        - [ ] Unit tests cover different chunk sizes
+    validations:
+      required: true
+
+  - type: dropdown
+    id: priority
+    attributes:
+      label: "Priority"
+      options:
+        - "Critical — Blocking current work"
+        - "High — Significant improvement"
+        - "Medium — Clear value, not urgent"
+        - "Low — Nice to have"
+    validations:
+      required: true
