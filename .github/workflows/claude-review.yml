@@ -22,6 +22,20 @@ jobs:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           github_token: ${{ secrets.GITHUB_TOKEN }}
           prompt: |
-            Respond to the comment on this PR/issue. Be concise — answer directly in 1–5 lines.
-            If asked to review: check issue link, code quality, RAG standards, post short verdict (✅/❌).
-            Never write paragraphs. Use bullet points only when listing issues.
+            Someone mentioned @claude in a PR/issue comment. Read the comment and respond.
+
+            STRICT OUTPUT RULES — your posted comment must follow this exactly:
+            - Maximum 3 lines total
+            - No headers, no task lists, no bold sections
+            - Start with ✅ or ❌ or the direct answer
+            - If listing issues: one bullet per line, nothing else
+
+            Examples of correct responses:
+            ✅ LGTM — issue addressed, no violations.
+            ❌ No linked issue (`Closes #N` missing). Add it and push.
+            ❌ Two issues: `print()` on line 47, batch size 500 (must be ≤ 100).
+
+            Context:
+            PR/Issue: ${{ github.event.issue.number }}
+            Comment: ${{ github.event.comment.body }}
+            Author: ${{ github.event.comment.user.login }}
