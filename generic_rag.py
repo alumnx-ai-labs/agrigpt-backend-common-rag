@@ -1,44 +1,45 @@
 """
-Generic RAG Ingestion Script 
-
+Generic RAG Ingestion Script — PDF → chunk → embed → Pinecone upsert.
 """
 
-import uuid
+import hashlib
+import logging
+import os
 import time
 from pathlib import Path
 from typing import List
 
+from dotenv import load_dotenv
 from pinecone import Pinecone, ServerlessSpec
 from sentence_transformers import SentenceTransformer
 from tqdm import tqdm
 from pypdf import PdfReader
 
+load_dotenv()
+
+logger = logging.getLogger(__name__)
 
 # ==============================
-# CONFIGURATION (EDIT THESE)
+# CONFIGURATION
 # ==============================
 
-PINECONE_API_KEY = "your_api_key"
-INDEX_NAME       = "your-index-name"
-
-NAMESPACE        = "my-namespace"          
-DOCUMENTS_PATH   = r"F:\documents_folder"  
-
-MODEL_NAME       = "all-MiniLM-L6-v2"
-CHUNK_SIZE       = 1000
-CHUNK_OVERLAP    = 150
-UPSERT_BATCH     = 100
-
+PINECONE_API_KEY: str = os.environ["PINECONE_API_KEY"]
+INDEX_NAME: str = os.environ["PINECONE_INDEX"]
+NAMESPACE: str = os.environ.get("PINECONE_NAMESPACE", "default")
+DOCUMENTS_PATH: str = os.environ["DOCUMENTS_PATH"]
+MODEL_NAME: str = os.environ.get("EMBEDDING_MODEL", "all-MiniLM-L6-v2")
+CHUNK_SIZE: int = int(os.environ.get("CHUNK_SIZE", "512"))
+CHUNK_OVERLAP: int = int(os.environ.get("CHUNK_OVERLAP", "50"))
+UPSERT_BATCH: int = 100
 
 # ==============================
 # LOAD EMBEDDING MODEL
 # ==============================
 
-print("🔹 Loading embedding model...")
+logger.info("Loading embedding model: %s", MODEL_NAME)
 embed_model = SentenceTransformer(MODEL_NAME)
-EMBEDDING_DIM = embed_model.get_sentence_embedding_dimension()
-print(f"✅ Model loaded (dim={EMBEDDING_DIM})")
-
+EMBEDDING_DIM: int = embed_model.get_sentence_embedding_dimension()
+logger.info("Model loaded (dim=%d)", EMBEDDING_DIM)
 
 # ==============================
 # PINECONE SETUP
@@ -46,11 +47,17 @@ print(f"✅ Model loaded (dim={EMBEDDING_DIM})")
 
 pc = Pinecone(api_key=PINECONE_API_KEY)
 
+
 def get_or_create_index():
+    """Return the Pinecone index, creating it if it does not exist.
+
+    Returns:
+        Pinecone Index object ready for upsert/query.
+    """
     existing = [i.name for i in pc.list_indexes()]
 
     if INDEX_NAME not in existing:
-        print(f"🆕 Creating index '{INDEX_NAME}' (dim={EMBEDDING_DIM})")
+        logger.info("Creating index '%s' (dim=%d)", INDEX_NAME, EMBEDDING_DIM)
         pc.create_index(
             name=INDEX_NAME,
             dimension=EMBEDDING_DIM,
@@ -67,13 +74,21 @@ def get_or_create_index():
 # ==============================
 
 def read_pdf(filepath: Path) -> str:
+    """Extract all text from a PDF file, page by page.
+
+    Args:
+        filepath: Path to the PDF file.
+
+    Returns:
+        Concatenated text from all pages with page markers.
+    """
     reader = PdfReader(str(filepath))
     pages_text = []
 
     for i, page in enumerate(reader.pages):
         text = page.extract_text()
         if text and text.strip():
-            pages_text.append(f"[Page {i+1}]\n{text}")
+            pages_text.append(f"[Page {i + 1}]\n{text}")
 
     return "\n\n".join(pages_text)
 
@@ -83,18 +98,29 @@ def read_pdf(filepath: Path) -> str:
 # ==============================
 
 def chunk_text(text: str) -> List[str]:
+    """Split text into overlapping fixed-size chunks.
+
+    Args:
+        text: Raw extracted text to split.
+
+    Returns:
+        List of non-empty text chunks.
+
+    Raises:
+        ValueError: If text is empty.
+    """
+    if not text.strip():
+        raise ValueError("text must not be empty")
+
     chunks = []
-    start = 0
     text = text.strip()
-    length = len(text)
+    start = 0
 
-    while start < length:
-        end = min(start + CHUNK_SIZE, length)
-        chunk = text[start:end]
-
-        if chunk.strip():
+    while start < len(text):
+        end = min(start + CHUNK_SIZE, len(text))
+        chunk = text[start:end].strip()
+        if chunk:
             chunks.append(chunk)
-
         start += CHUNK_SIZE - CHUNK_OVERLAP
 
     return chunks
@@ -105,17 +131,36 @@ def chunk_text(text: str) -> List[str]:
 # ==============================
 
 def get_embeddings(texts: List[str]) -> List[List[float]]:
-    return embed_model.encode(texts, show_progress_bar=True).tolist()
+    """Batch-encode texts into normalised embeddings.
+
+    Args:
+        texts: List of text strings to embed.
+
+    Returns:
+        List of embedding vectors (each of length EMBEDDING_DIM).
+    """
+    return embed_model.encode(
+        texts,
+        batch_size=32,
+        show_progress_bar=False,
+        normalize_embeddings=True,
+    ).tolist()
 
 
 # ==============================
 # UPSERT
 # ==============================
 
-def upsert_vectors(index, vectors):
-    batches = [vectors[i:i+UPSERT_BATCH] for i in range(0, len(vectors), UPSERT_BATCH)]
+def upsert_vectors(index, vectors: list) -> None:
+    """Upload vectors to Pinecone in batches of UPSERT_BATCH.
 
-    for batch in tqdm(batches, desc=f"⬆ Uploading to namespace '{NAMESPACE}'"):
+    Args:
+        index: Pinecone Index object.
+        vectors: List of vector dicts with id, values, and metadata.
+    """
+    batches = [vectors[i : i + UPSERT_BATCH] for i in range(0, len(vectors), UPSERT_BATCH)]
+
+    for batch in tqdm(batches, desc=f"Uploading to namespace '{NAMESPACE}'"):
         index.upsert(vectors=batch, namespace=NAMESPACE)
 
 
@@ -123,56 +168,60 @@ def upsert_vectors(index, vectors):
 # MAIN INGESTION
 # ==============================
 
-def ingest():
+def ingest() -> None:
+    """Run the full PDF ingestion pipeline: extract → chunk → embed → upsert.
+
+    Raises:
+        FileNotFoundError: If DOCUMENTS_PATH does not exist.
+    """
     root = Path(DOCUMENTS_PATH)
 
     if not root.exists():
-        print("❌ Documents path not found")
-        return
+        raise FileNotFoundError(f"Documents path not found: {DOCUMENTS_PATH}")
 
     index = get_or_create_index()
-
     pdf_files = list(root.rglob("*.pdf"))
 
     if not pdf_files:
-        print("⚠ No PDFs found")
+        logger.warning("No PDFs found in %s", DOCUMENTS_PATH)
         return
 
-    print(f"\n📂 Found {len(pdf_files)} PDF files")
+    logger.info("Found %d PDF files", len(pdf_files))
     total_vectors = 0
 
     for filepath in pdf_files:
-        print(f"\n📄 Processing: {filepath.name}")
+        logger.info("Processing: %s", filepath.name)
 
         text = read_pdf(filepath)
 
         if not text.strip():
-            print("❌ No extractable text found (probably scanned PDF)")
+            logger.warning("No extractable text in %s — skipping", filepath.name)
             continue
 
+        file_hash = hashlib.sha256(filepath.read_bytes()).hexdigest()
         chunks = chunk_text(text)
         embeddings = get_embeddings(chunks)
 
-        vectors = []
-        for i, (chunk, embedding) in enumerate(zip(chunks, embeddings)):
-            vectors.append({
-                "id": f"{filepath.stem}_{i}_{uuid.uuid4().hex[:6]}",
+        vectors = [
+            {
+                "id": f"{file_hash}_{i}",
                 "values": embedding,
                 "metadata": {
                     "source": filepath.name,
                     "chunk_index": i,
-                    "text": chunk
-                }
-            })
+                    "chunk_text": chunk,
+                },
+            }
+            for i, (chunk, embedding) in enumerate(zip(chunks, embeddings))
+        ]
 
         upsert_vectors(index, vectors)
         total_vectors += len(vectors)
+        logger.info("Uploaded %d vectors from %s", len(vectors), filepath.name)
 
-        print(f"✅ {len(vectors)} vectors uploaded")
-
-    print("\n🎉 Ingestion Complete!")
-    print(f"Total vectors uploaded: {total_vectors}")
+    logger.info("Ingestion complete — total vectors: %d", total_vectors)
 
 
 if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO)
     ingest()

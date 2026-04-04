@@ -21,7 +21,7 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Claude Deep PR Review
+      - name: Claude PR Review
         uses: anthropics/claude-code-action@v1
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -29,48 +29,48 @@ jobs:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           github_token: ${{ secrets.GITHUB_TOKEN }}
           prompt: |
-            You are a senior ML/backend engineer reviewing a PR for agrigpt-backend-common-rag (Python RAG pipeline: PDF → chunking → Sentence Transformers 384-dim → Pinecone).
+            Review PR #${{ github.event.pull_request.number }} for agrigpt-backend-common-rag (Python RAG pipeline).
 
-            PR NUMBER : ${{ github.event.pull_request.number }}
-            PR TITLE  : ${{ github.event.pull_request.title }}
-            PR AUTHOR : ${{ github.event.pull_request.user.login }}
-            PR BRANCH : ${{ github.event.pull_request.head.ref }} → ${{ github.event.pull_request.base.ref }}
-            PR BODY:
-            ${{ github.event.pull_request.body }}
+            PR: "${{ github.event.pull_request.title }}" by @${{ github.event.pull_request.user.login }}
+            Body: ${{ github.event.pull_request.body }}
 
-            STEP 1 — LINKED ISSUE CHECK:
-            Scan PR body for: Closes #N, Fixes #N, Resolves #N, or #N
-            If NO issue number found → run:
-              gh pr review ${{ github.event.pull_request.number }} --request-changes --body "## ❌ Rejected — No Linked Issue\n\nThis PR has no linked GitHub issue. Add `Closes #ISSUE_NUMBER` to your PR description and push an update."
-              gh pr edit ${{ github.event.pull_request.number }} --add-label "claude:rejected"
-            Then STOP.
+            RUN THESE CHECKS IN ORDER:
 
-            STEP 2 — FETCH ISSUE:
-            gh issue view [N] --json number,title,body,labels
-            Extract: problem, acceptance criteria, affected components
+            1. ISSUE LINK — scan PR body for "Closes #N", "Fixes #N", "Resolves #N"
+               If missing → label claude:rejected, post:
+               "❌ No linked issue. Add `Closes #N` to your PR description."
+               Then STOP.
 
-            STEP 3 — CODE DIFF:
-            gh pr diff ${{ github.event.pull_request.number }}
-            gh pr view ${{ github.event.pull_request.number }} --json files,additions,deletions
+            2. FETCH DATA:
+               gh issue view [N] --json title,body
+               gh pr diff ${{ github.event.pull_request.number }}
 
-            Check Python: PEP8, type hints, docstrings, no bare except, no print(), no commented code
-            Check RAG: no hardcoded keys, configurable chunk size, batch ≤ 100, dim = 384, idempotent IDs, no silent failures
+            3. CHECK (flag only failures):
+               - PR addresses the issue?
+               - No hardcoded secrets?
+               - Uses logging not print()?
+               - Type hints + docstrings on public functions?
+               - Pinecone batch ≤ 100 and dim = 384 (if applicable)?
+               - No bare except or silent failures?
 
-            STEP 4 — REQUIREMENTS TABLE:
-            Build table: Issue Requirement | Files Changed | Status (✅/❌/⚠️) | Evidence
+            4. DECIDE:
 
-            STEP 5 — DECISION:
-            APPROVE if: valid issue, diff addresses all requirements, no critical violations
-            REJECT if: no issue, wrong files changed, missing requirements, hardcoded secrets, wrong dimensions
-
-            IF APPROVED:
+            IF ALL PASS:
               gh pr edit ${{ github.event.pull_request.number }} --add-label "claude:approved" 2>/dev/null || true
-              gh pr review ${{ github.event.pull_request.number }} --approve --body "## ✅ Claude Review: APPROVED\n\nCloses #[N] — [title]\n\n[verification table]\n[what PR does]\n[requirements coverage]\n\n*Auto-approved. In the claude:approved merge queue.*"
+              gh pr review ${{ github.event.pull_request.number }} --approve --body "✅ **Approved** — Closes #[N]
+
+            [One sentence: what this PR does and why it's correct.]
+
+            _Auto-approved · In merge queue_"
               gh pr merge ${{ github.event.pull_request.number }} --auto --squash --delete-branch 2>/dev/null || true
 
-            IF REJECTED:
+            IF ANY FAIL:
               gh pr edit ${{ github.event.pull_request.number }} --add-label "claude:rejected" 2>/dev/null || true
-              gh pr review ${{ github.event.pull_request.number }} --request-changes --body "## ❌ Claude Review: NOT APPROVED\n\nIssue #[N]\n\n[why rejected]\n[requirements table]\n[fixes needed]\n\n*Push fixes and Claude will re-review automatically.*"
+              gh pr review ${{ github.event.pull_request.number }} --request-changes --body "❌ **Changes needed** — #[N]
+
+            [Bullet list — one line per issue, specific and actionable]
+
+            _Fix the above and push — Claude will re-review._"
 
   manual-review:
     runs-on: ubuntu-latest
@@ -92,16 +92,14 @@ jobs:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           github_token: ${{ secrets.GITHUB_TOKEN }}
           prompt: |
-            @${{ github.event.comment.user.login }} requested a re-review of PR #${{ github.event.issue.number }}.
+            @${{ github.event.comment.user.login }} triggered re-review of PR #${{ github.event.issue.number }}.
 
-            Run the full review:
-            1. gh pr view ${{ github.event.issue.number }} --json body,title,number,headRefName
-            2. Extract linked issue number from PR body
-            3. gh issue view [N] — fetch requirements
-            4. gh pr diff ${{ github.event.issue.number }} — get code diff
-            5. Compare requirements vs implementation
-            6. Check RAG pipeline integrity and Python standards
-            7. Post detailed review, update label (claude:approved or claude:rejected)
-            8. If approved: gh pr merge ${{ github.event.issue.number }} --auto --squash
+            1. gh pr view ${{ github.event.issue.number }} --json body,title
+            2. Extract issue number → gh issue view [N] --json title,body
+            3. gh pr diff ${{ github.event.issue.number }}
+            4. Check: issue addressed, no secrets, logging used, type hints, RAG standards (batch≤100, dim=384)
+            5. Post short verdict (approved ✅ or changes needed ❌ with bullet list)
+            6. Update label (claude:approved or claude:rejected)
+            7. If approved: gh pr merge ${{ github.event.issue.number }} --auto --squash
 
-            Repo: agrigpt-backend-common-rag (Python RAG, Pinecone, Sentence Transformers 384-dim)
+            Keep the review comment under 10 lines. Be direct.
