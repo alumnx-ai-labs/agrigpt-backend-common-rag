@@ -1,32 +1,39 @@
 """
-Generic RAG Ingestion Script 
+Generic RAG Ingestion Script
 
 """
 
+import logging
+import os
 import uuid
 import time
 from pathlib import Path
 from typing import List
 
+from dotenv import load_dotenv
 from pinecone import Pinecone, ServerlessSpec
 from sentence_transformers import SentenceTransformer
 from tqdm import tqdm
 from pypdf import PdfReader
 
+load_dotenv()
+
+logger = logging.getLogger(__name__)
+logging.basicConfig(level=logging.INFO)
 
 # ==============================
-# CONFIGURATION (EDIT THESE)
+# CONFIGURATION (from env vars)
 # ==============================
 
-PINECONE_API_KEY = "your_api_key"
-INDEX_NAME       = "your-index-name"
+PINECONE_API_KEY = os.environ["PINECONE_API_KEY"]
+INDEX_NAME       = os.environ["PINECONE_INDEX_NAME"]
 
-NAMESPACE        = "my-namespace"          
-DOCUMENTS_PATH   = r"F:\documents_folder"  
+NAMESPACE        = os.environ.get("PINECONE_NAMESPACE", "default")
+DOCUMENTS_PATH   = os.environ["DOCUMENTS_PATH"]
 
-MODEL_NAME       = "all-MiniLM-L6-v2"
-CHUNK_SIZE       = 1000
-CHUNK_OVERLAP    = 150
+MODEL_NAME       = os.environ.get("EMBEDDING_MODEL", "all-MiniLM-L6-v2")
+CHUNK_SIZE       = int(os.environ.get("CHUNK_SIZE", "1000"))
+CHUNK_OVERLAP    = int(os.environ.get("CHUNK_OVERLAP", "150"))
 UPSERT_BATCH     = 100
 
 
@@ -34,10 +41,10 @@ UPSERT_BATCH     = 100
 # LOAD EMBEDDING MODEL
 # ==============================
 
-print("🔹 Loading embedding model...")
+logger.info("Loading embedding model: %s", MODEL_NAME)
 embed_model = SentenceTransformer(MODEL_NAME)
 EMBEDDING_DIM = embed_model.get_sentence_embedding_dimension()
-print(f"✅ Model loaded (dim={EMBEDDING_DIM})")
+logger.info("Model loaded (dim=%d)", EMBEDDING_DIM)
 
 
 # ==============================
@@ -50,7 +57,7 @@ def get_or_create_index():
     existing = [i.name for i in pc.list_indexes()]
 
     if INDEX_NAME not in existing:
-        print(f"🆕 Creating index '{INDEX_NAME}' (dim={EMBEDDING_DIM})")
+        logger.info("Creating index '%s' (dim=%d)", INDEX_NAME, EMBEDDING_DIM)
         pc.create_index(
             name=INDEX_NAME,
             dimension=EMBEDDING_DIM,
@@ -127,7 +134,7 @@ def ingest():
     root = Path(DOCUMENTS_PATH)
 
     if not root.exists():
-        print("❌ Documents path not found")
+        logger.error("Documents path not found: %s", root)
         return
 
     index = get_or_create_index()
@@ -135,19 +142,19 @@ def ingest():
     pdf_files = list(root.rglob("*.pdf"))
 
     if not pdf_files:
-        print("⚠ No PDFs found")
+        logger.warning("No PDFs found in %s", root)
         return
 
-    print(f"\n📂 Found {len(pdf_files)} PDF files")
+    logger.info("Found %d PDF files", len(pdf_files))
     total_vectors = 0
 
     for filepath in pdf_files:
-        print(f"\n📄 Processing: {filepath.name}")
+        logger.info("Processing: %s", filepath.name)
 
         text = read_pdf(filepath)
 
         if not text.strip():
-            print("❌ No extractable text found (probably scanned PDF)")
+            logger.warning("No extractable text in %s (possibly scanned PDF)", filepath.name)
             continue
 
         chunks = chunk_text(text)
@@ -168,10 +175,9 @@ def ingest():
         upsert_vectors(index, vectors)
         total_vectors += len(vectors)
 
-        print(f"✅ {len(vectors)} vectors uploaded")
+        logger.info("Uploaded %d vectors for %s", len(vectors), filepath.name)
 
-    print("\n🎉 Ingestion Complete!")
-    print(f"Total vectors uploaded: {total_vectors}")
+    logger.info("Ingestion complete. Total vectors uploaded: %d", total_vectors)
 
 
 if __name__ == "__main__":
